@@ -1,5 +1,7 @@
 # PUBG RangeFinder — local version
 
+**English** | [简体中文](README.zh-CN.md)
+
 A local-runnable copy of the public PUBG RangeFinder at
 <https://rangefinder.pages.dev/rondo>.
 
