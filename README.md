@@ -18,6 +18,10 @@ npm install
 npm start
 ```
 
+`npm install` also restores the bundled high-resolution map images from the
+lossless chunks in `asset-chunks/`. This keeps the repository compatible with
+the upload pipeline while reproducing the original image bytes exactly.
+
 Open the URL printed by Vite (normally <http://localhost:5173>) or go directly
 to <http://localhost:5173/rondo>.
 

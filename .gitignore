@@ -14,6 +14,10 @@ dist-ssr
 coverage
 *.local
 
+# Rebuilt losslessly from asset-chunks/ by npm install
+src/assets/img/pubg-bg.jpg
+src/assets/img/maps/*_Main_High_Res.jpg
+
 /cypress/videos/
 /cypress/screenshots/
 
