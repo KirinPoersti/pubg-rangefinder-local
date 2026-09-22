@@ -84,7 +84,7 @@ export default {
   margin-left: 20px;
   cursor: pointer;
   font-weight: 600;
-  color: #c9d2d9;
+  color: #ffd24a;
 }
 .active{
   color: #ffd24a;
