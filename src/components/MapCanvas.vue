@@ -31,6 +31,10 @@ declare interface BaseComponentData {
   pinchStartDistance: number;
   pinchStartZoom: number;
   pinchAnchor: ICoords;
+  wheelAnchor: ICoords | null;
+  wheelCursor: ICoords;
+  wheelPullProgress: number;
+  wheelLastEventTime: number;
   currentOffset: ICoords;
   coordsStart: ICoords;
   dots: Array<ICoords>;
@@ -39,7 +43,13 @@ declare interface BaseComponentData {
 
 const emptyCoords: ICoords = { x: 0, y: 0 };
 
-const [MAX_ZOOM, ZOOM_FACTOR, WHEEL_ZOOM_SENSITIVITY] = [1.5, 1.25, 0.0015];
+const [MAX_ZOOM, ZOOM_FACTOR, WHEEL_ZOOM_SENSITIVITY, CAMERA_PULL_SENSITIVITY] = [
+  1.5,
+  1.25,
+  0.0015,
+  0.006
+];
+const [WHEEL_SESSION_TIMEOUT, WHEEL_TARGET_MOVE_THRESHOLD] = [220, 32];
 
 export default {
   props: {
@@ -73,6 +83,10 @@ export default {
       pinchStartDistance: 0,
       pinchStartZoom: 0,
       pinchAnchor: { ...emptyCoords },
+      wheelAnchor: null,
+      wheelCursor: { ...emptyCoords },
+      wheelPullProgress: 0,
+      wheelLastEventTime: 0,
       currentOffset: { ...emptyCoords },
       coordsStart: { ...emptyCoords },
       dots: [],
@@ -357,14 +371,47 @@ export default {
         Math.min(MAX_ZOOM, this.currentZoom * zoomFactor)
       );
 
-      this.zoomAtPoint(nextZoom, { x: event.clientX, y: event.clientY });
+      const now = performance.now();
+      const cursor = { x: event.clientX, y: event.clientY };
+      const cursorMovement = Math.hypot(
+        cursor.x - this.wheelCursor.x,
+        cursor.y - this.wheelCursor.y
+      );
+      const startsNewSession = !this.wheelAnchor
+        || now - this.wheelLastEventTime > WHEEL_SESSION_TIMEOUT
+        || cursorMovement > WHEEL_TARGET_MOVE_THRESHOLD;
+
+      if (startsNewSession) {
+        this.wheelAnchor = this.getClickCoordsOverCanvas(cursor);
+        this.wheelCursor = cursor;
+        this.wheelPullProgress = 0;
+      }
+
+      const pullStep = 1 - Math.exp(-Math.abs(limitedDelta) * CAMERA_PULL_SENSITIVITY);
+      this.wheelPullProgress = 1 - (1 - this.wheelPullProgress) * (1 - pullStep);
+      this.wheelLastEventTime = now;
+
+      const canvasRect = this.canvas.getBoundingClientRect();
+      const canvasCenter = {
+        x: canvasRect.x + canvasRect.width / 2,
+        y: canvasRect.y + canvasRect.height / 2
+      };
+      const correctedPoint = {
+        x: this.wheelCursor.x
+          + (canvasCenter.x - this.wheelCursor.x) * this.wheelPullProgress,
+        y: this.wheelCursor.y
+          + (canvasCenter.y - this.wheelCursor.y) * this.wheelPullProgress
+      };
+
+      if (!this.wheelAnchor) return;
+      this.zoomAtPoint(nextZoom, correctedPoint, this.wheelAnchor);
     },
 
     zoomAtPoint(nextZoom: number, clientPoint: ICoords, anchor?: ICoords) {
       if (!this.canvas || !this.image) return;
 
       const roundedZoom = +nextZoom.toFixed(6);
-      if (roundedZoom === this.currentZoom) return;
+      if (roundedZoom === this.currentZoom && !anchor) return;
 
       const mapAnchor = anchor ?? this.getClickCoordsOverCanvas(clientPoint);
       const canvasRect = this.canvas.getBoundingClientRect();
@@ -394,6 +441,8 @@ export default {
 
         this.pointerDown = { x: event.clientX, y: event.clientY };
         this.pointerMoved = false;
+        this.wheelAnchor = null;
+        this.wheelPullProgress = 0;
 
         if (event.pointerType !== 'mouse') {
           if (this.activePointers.size < 2) {
@@ -547,6 +596,8 @@ export default {
       this.pinchStartDistance = this.getPinchDistance(points);
       this.pinchStartZoom = this.currentZoom;
       this.pinchAnchor = this.getClickCoordsOverCanvas(this.getPinchMidpoint(points));
+      this.wheelAnchor = null;
+      this.wheelPullProgress = 0;
     },
 
     handlePinchMove() {
@@ -598,7 +649,7 @@ export default {
       <button @click="decZoom" class="map_bttn">-</button>
     </div>
     <div class="map_hint" aria-live="polite">
-      <span class="desktop_hint">Scroll at cursor to zoom · Right-click markers · Drag to move</span>
+      <span class="desktop_hint">Scroll to zoom + centre · Right-click markers · Drag to move</span>
       <span class="mobile_hint">Double-tap markers · Pinch to zoom · Drag to move</span>
     </div>
     <canvas 
