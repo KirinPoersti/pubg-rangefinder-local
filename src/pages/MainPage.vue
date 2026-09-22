@@ -36,7 +36,8 @@ export default {
 
 <style scoped>
 .main{
-  min-height: calc(100vh - 50px);
+  min-height: calc(100vh - var(--header-height));
+  min-height: calc(100dvh - var(--header-height));
   background-color: black;
   background-image: v-bind(bgimg);
   background-size: cover;
@@ -48,11 +49,28 @@ export default {
 }
 .main_cards{
   width: 100%;
-  margin-top: 25%;
-  display: flex;
-  align-items: center;
+  padding: clamp(180px, 27vh, 360px) 20px 40px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 250px));
+  align-items: start;
   justify-content: center;
   gap: 20px;
-  flex-wrap: wrap;
+}
+
+@media (max-width: 700px) {
+  .main {
+    background-position: center top;
+  }
+  .main_cards {
+    padding: clamp(120px, 23vh, 210px) 12px 24px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+@media (max-width: 340px) {
+  .main_cards {
+    grid-template-columns: minmax(0, 250px);
+  }
 }
 </style>
