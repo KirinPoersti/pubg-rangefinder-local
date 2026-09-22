@@ -31,9 +31,9 @@ declare interface BaseComponentData {
   pinchStartDistance: number;
   pinchStartZoom: number;
   pinchAnchor: ICoords;
-  wheelAnchor: ICoords | null;
-  wheelFocusPoint: ICoords;
-  wheelLastEventTime: number;
+  focusPoint: ICoords | null;
+  focusPointVisible: boolean;
+  focusPointTimer: number | null;
   currentOffset: ICoords;
   coordsStart: ICoords;
   dots: Array<ICoords>;
@@ -47,7 +47,7 @@ const [MAX_ZOOM, ZOOM_FACTOR, WHEEL_ZOOM_SENSITIVITY] = [
   1.25,
   0.0015
 ];
-const WHEEL_SESSION_TIMEOUT = 320;
+const FOCUS_POINT_DURATION = 3200;
 
 export default {
   props: {
@@ -81,9 +81,9 @@ export default {
       pinchStartDistance: 0,
       pinchStartZoom: 0,
       pinchAnchor: { ...emptyCoords },
-      wheelAnchor: null,
-      wheelFocusPoint: { ...emptyCoords },
-      wheelLastEventTime: 0,
+      focusPoint: null,
+      focusPointVisible: false,
+      focusPointTimer: null,
       currentOffset: { ...emptyCoords },
       coordsStart: { ...emptyCoords },
       dots: [],
@@ -132,6 +132,7 @@ export default {
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.handleResize);
+    if (this.focusPointTimer !== null) window.clearTimeout(this.focusPointTimer);
   },
   methods: {
     drawBackground() {
@@ -175,6 +176,7 @@ export default {
       );
 
       this.drawMarks();
+      this.drawFocusPoint();
     },
 
     getPanLimits(): ICoords {
@@ -182,23 +184,11 @@ export default {
         return { ...emptyCoords };
       }
 
-      const viewportWidth = this.canvas.width / this.currentZoom;
-      const viewportHeight = this.canvas.height / this.currentZoom;
-      const fitGutterX = Math.max(
-        0,
-        (this.canvas.width - this.image.width * this.minZoom) / 2
-      ) / this.currentZoom;
-      const fitGutterY = Math.max(
-        0,
-        (this.canvas.height - this.image.height * this.minZoom) / 2
-      ) / this.currentZoom;
-
       return {
-        // Preserve the empty margin from the whole-map view. Without this
-        // allowance, the boundary clamp overrides cursor-anchored zoom until
-        // the map grows wider/taller than the viewport.
-        x: Math.max(0, (this.image.width - viewportWidth) / 2) + fitGutterX,
-        y: Math.max(0, (this.image.height - viewportHeight) / 2) + fitGutterY,
+        // Let any selected map location reach the viewport centre while still
+        // preventing the map from being dragged completely out of view.
+        x: this.image.width / 2,
+        y: this.image.height / 2,
       };
     },
 
@@ -251,6 +241,86 @@ export default {
         this.drawLine();
         this.drawRangeValue(range);
       }
+    },
+
+    drawFocusPoint() {
+      if (!this.focusPoint || !this.focusPointVisible || !this.context) return;
+
+      const center = {
+        x: this.coordsStart.x + this.focusPoint.x,
+        y: this.coordsStart.y + this.focusPoint.y
+      };
+      const outerRadius = 20 / this.currentZoom;
+      const innerRadius = 5 / this.currentZoom;
+      const gradient = this.context.createRadialGradient(
+        center.x,
+        center.y,
+        innerRadius,
+        center.x,
+        center.y,
+        outerRadius
+      );
+
+      gradient.addColorStop(0, 'rgba(244, 248, 250, 0.48)');
+      gradient.addColorStop(0.55, 'rgba(207, 220, 228, 0.24)');
+      gradient.addColorStop(1, 'rgba(159, 178, 190, 0.08)');
+
+      this.context.save();
+      this.context.beginPath();
+      this.context.arc(center.x, center.y, outerRadius, 0, Math.PI * 2);
+      this.context.fillStyle = gradient;
+      this.context.shadowColor = 'rgba(8, 12, 15, 0.7)';
+      this.context.shadowBlur = 14;
+      this.context.fill();
+      this.context.shadowBlur = 0;
+      this.context.strokeStyle = 'rgba(255, 210, 74, 0.82)';
+      this.context.lineWidth = 1.5 / this.currentZoom;
+      this.context.stroke();
+
+      this.context.beginPath();
+      this.context.arc(center.x, center.y, innerRadius, 0, Math.PI * 2);
+      this.context.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      this.context.fill();
+      this.context.restore();
+    },
+
+    revealFocusPoint() {
+      this.focusPointVisible = true;
+      if (this.focusPointTimer !== null) window.clearTimeout(this.focusPointTimer);
+
+      this.focusPointTimer = window.setTimeout(() => {
+        this.focusPointVisible = false;
+        this.focusPointTimer = null;
+        this.draw();
+      }, FOCUS_POINT_DURATION);
+    },
+
+    selectFocusPoint(clientPoint: ICoords) {
+      if (!this.image) return;
+
+      const mapPoint = this.getClickCoordsOverCanvas(clientPoint);
+      if (
+        mapPoint.x < 0
+        || mapPoint.x > this.image.width
+        || mapPoint.y < 0
+        || mapPoint.y > this.image.height
+      ) return;
+
+      this.focusPoint = mapPoint;
+      this.currentOffset = this.clampPanOffset({
+        x: mapPoint.x - this.image.width / 2,
+        y: mapPoint.y - this.image.height / 2
+      });
+      this.revealFocusPoint();
+      this.draw();
+    },
+
+    getCanvasCenter(): ICoords {
+      const boundingRect = this.canvas!.getBoundingClientRect();
+      return {
+        x: boundingRect.x + boundingRect.width / 2,
+        y: boundingRect.y + boundingRect.height / 2
+      };
     },
 
     drawLine() {
@@ -321,11 +391,9 @@ export default {
       );
       if (nextZoom === this.currentZoom) return;
 
-      const boundingRect = this.canvas!.getBoundingClientRect();
-      this.zoomAtPoint(nextZoom, {
-        x: boundingRect.x + boundingRect.width / 2,
-        y: boundingRect.y + boundingRect.height / 2
-      });
+      const canvasCenter = this.getCanvasCenter();
+      if (this.focusPoint) this.revealFocusPoint();
+      this.zoomAtPoint(nextZoom, canvasCenter, this.focusPoint ?? undefined);
     },
 
     incZoom() {
@@ -382,19 +450,9 @@ export default {
         Math.min(MAX_ZOOM, this.currentZoom * zoomFactor)
       );
 
-      const now = performance.now();
-      const cursor = { x: event.clientX, y: event.clientY };
-      const startsNewSession = !this.wheelAnchor
-        || now - this.wheelLastEventTime > WHEEL_SESSION_TIMEOUT;
-
-      if (startsNewSession) {
-        this.wheelAnchor = this.getClickCoordsOverCanvas(cursor);
-        this.wheelFocusPoint = cursor;
-      }
-
-      this.wheelLastEventTime = now;
-      if (!this.wheelAnchor) return;
-      this.zoomAtPoint(nextZoom, this.wheelFocusPoint, this.wheelAnchor);
+      const canvasCenter = this.getCanvasCenter();
+      if (this.focusPoint) this.revealFocusPoint();
+      this.zoomAtPoint(nextZoom, canvasCenter, this.focusPoint ?? undefined);
     },
 
     zoomAtPoint(nextZoom: number, clientPoint: ICoords, anchor?: ICoords) {
@@ -431,7 +489,6 @@ export default {
 
         this.pointerDown = { x: event.clientX, y: event.clientY };
         this.pointerMoved = false;
-        this.wheelAnchor = null;
 
         if (event.pointerType !== 'mouse') {
           if (this.activePointers.size < 2) {
@@ -483,6 +540,15 @@ export default {
 
       if (event.pointerType !== 'mouse') {
         this.activePointers.delete(event.pointerId);
+      }
+
+      if (
+        event.type !== 'pointercancel'
+        && event.pointerType === 'mouse'
+        && !this.pointerMoved
+        && !wasMovingMarker
+      ) {
+        this.selectFocusPoint({ x: event.clientX, y: event.clientY });
       }
 
       if (
@@ -585,7 +651,6 @@ export default {
       this.pinchStartDistance = this.getPinchDistance(points);
       this.pinchStartZoom = this.currentZoom;
       this.pinchAnchor = this.getClickCoordsOverCanvas(this.getPinchMidpoint(points));
-      this.wheelAnchor = null;
     },
 
     handlePinchMove() {
@@ -637,7 +702,7 @@ export default {
       <button @click="decZoom" class="map_bttn">-</button>
     </div>
     <div class="map_hint" aria-live="polite">
-      <span class="desktop_hint">Scroll to focus + zoom · Right-click markers · Drag to move</span>
+      <span class="desktop_hint">Click to focus · Scroll to zoom · Right-click markers · Drag to move</span>
       <span class="mobile_hint">Double-tap markers · Pinch to zoom · Drag to move</span>
     </div>
     <canvas 
