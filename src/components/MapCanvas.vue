@@ -24,6 +24,12 @@ declare interface BaseComponentData {
   pointerMoved: boolean;
   lastTapTime: number;
   lastTapCoords: ICoords;
+  activePointers: Map<number, ICoords>;
+  pinching: boolean;
+  pinchGesture: boolean;
+  pinchStartDistance: number;
+  pinchStartZoom: number;
+  pinchAnchor: ICoords;
   currentOffset: ICoords;
   coordsStart: ICoords;
   dots: Array<ICoords>;
@@ -59,6 +65,12 @@ export default {
       pointerMoved: false,
       lastTapTime: 0,
       lastTapCoords: { ...emptyCoords },
+      activePointers: new Map<number, ICoords>(),
+      pinching: false,
+      pinchGesture: false,
+      pinchStartDistance: 0,
+      pinchStartZoom: 0,
+      pinchAnchor: { ...emptyCoords },
       currentOffset: { ...emptyCoords },
       coordsStart: { ...emptyCoords },
       dots: [],
@@ -323,6 +335,22 @@ export default {
         this.pointerDown = { x: event.clientX, y: event.clientY };
         this.pointerMoved = false;
 
+        if (event.pointerType !== 'mouse') {
+          if (this.activePointers.size < 2) {
+            this.activePointers.set(event.pointerId, {
+              x: event.clientX,
+              y: event.clientY
+            });
+          }
+
+          if (this.activePointers.size === 2) {
+            if (!this.pinching) this.startPinch();
+            return;
+          }
+
+          if (this.pinchGesture) return;
+        }
+
         if (this.dots.length > 0) {
 
           const markerUnderCursor = this.getMarkerUnderCursor({ x: event.clientX, y: event.clientY });
@@ -353,12 +381,18 @@ export default {
 
     handleMouseUp(event: PointerEvent) {
       const wasMovingMarker = this.movingMarker !== null;
+      const wasPinchGesture = this.pinchGesture;
+
+      if (event.pointerType !== 'mouse') {
+        this.activePointers.delete(event.pointerId);
+      }
 
       if (
         event.type !== 'pointercancel'
         && event.pointerType !== 'mouse'
         && !this.pointerMoved
         && !wasMovingMarker
+        && !wasPinchGesture
       ) {
         this.handleTouchTap({ x: event.clientX, y: event.clientY });
       }
@@ -369,6 +403,15 @@ export default {
       if (this.canvas?.hasPointerCapture(event.pointerId)) {
         this.canvas.releasePointerCapture(event.pointerId);
       }
+
+      if (this.activePointers.size < 2) {
+        this.pinching = false;
+        this.pinchStartDistance = 0;
+      }
+
+      if (this.activePointers.size === 0) {
+        this.pinchGesture = false;
+      }
     },
 
     disableContextMenu(event: MouseEvent) {
@@ -376,6 +419,18 @@ export default {
     },
 
     handleMouseMove(event: PointerEvent) {
+      if (event.pointerType !== 'mouse' && this.activePointers.has(event.pointerId)) {
+        this.activePointers.set(event.pointerId, {
+          x: event.clientX,
+          y: event.clientY
+        });
+      }
+
+      if (this.pinching && this.activePointers.size >= 2) {
+        this.handlePinchMove();
+        return;
+      }
+
       if (this.dragging) {
 
         const movement = Math.hypot(
@@ -398,6 +453,71 @@ export default {
         this.moveMarker(this.movingMarker, coordsUnderCursor);
       }
 
+    },
+
+    getPinchPoints(): [ICoords, ICoords] | null {
+      const points = Array.from(this.activePointers.values());
+      if (points.length < 2) return null;
+      return [points[0], points[1]];
+    },
+
+    getPinchMidpoint(points: [ICoords, ICoords]): ICoords {
+      return {
+        x: (points[0].x + points[1].x) / 2,
+        y: (points[0].y + points[1].y) / 2
+      };
+    },
+
+    getPinchDistance(points: [ICoords, ICoords]): number {
+      return Math.hypot(
+        points[0].x - points[1].x,
+        points[0].y - points[1].y
+      );
+    },
+
+    startPinch() {
+      const points = this.getPinchPoints();
+      if (!points) return;
+
+      this.pinching = true;
+      this.pinchGesture = true;
+      this.pointerMoved = true;
+      this.dragging = false;
+      this.movingMarker = null;
+      this.pinchStartDistance = this.getPinchDistance(points);
+      this.pinchStartZoom = this.currentZoom;
+      this.pinchAnchor = this.getClickCoordsOverCanvas(this.getPinchMidpoint(points));
+    },
+
+    handlePinchMove() {
+      const points = this.getPinchPoints();
+      if (!points || this.pinchStartDistance <= 0 || !this.canvas || !this.image) return;
+
+      const distance = this.getPinchDistance(points);
+      const zoomRatio = distance / this.pinchStartDistance;
+      const nextZoom = Math.max(
+        MIN_ZOOM,
+        Math.min(MAX_ZOOM, this.pinchStartZoom * zoomRatio)
+      );
+      const midpoint = this.getPinchMidpoint(points);
+      const canvasRect = this.canvas.getBoundingClientRect();
+      const midpointOnCanvas = {
+        x: midpoint.x - canvasRect.x,
+        y: midpoint.y - canvasRect.y
+      };
+
+      this.currentZoom = +nextZoom.toFixed(3);
+      this.currentOffset = this.clampPanOffset({
+        x: this.pinchAnchor.x
+          - this.image.width / 2
+          - (midpointOnCanvas.x - this.canvas.width / 2) / this.currentZoom,
+        y: this.pinchAnchor.y
+          - this.image.height / 2
+          - (midpointOnCanvas.y - this.canvas.height / 2) / this.currentZoom
+      });
+
+      this.setZoom();
+      this.draw();
     },
 
     handleTouchTap(coords: ICoords) {
@@ -437,7 +557,7 @@ export default {
     </div>
     <div class="map_hint" aria-live="polite">
       <span class="desktop_hint">Right-click to place markers · Drag to move</span>
-      <span class="mobile_hint">Double-tap to place markers · Drag to move</span>
+      <span class="mobile_hint">Double-tap markers · Pinch to zoom · Drag to move</span>
     </div>
     <canvas 
       @contextmenu="disableContextMenu"
