@@ -182,9 +182,23 @@ export default {
         return { ...emptyCoords };
       }
 
+      const viewportWidth = this.canvas.width / this.currentZoom;
+      const viewportHeight = this.canvas.height / this.currentZoom;
+      const fitGutterX = Math.max(
+        0,
+        (this.canvas.width - this.image.width * this.minZoom) / 2
+      ) / this.currentZoom;
+      const fitGutterY = Math.max(
+        0,
+        (this.canvas.height - this.image.height * this.minZoom) / 2
+      ) / this.currentZoom;
+
       return {
-        x: Math.max(0, (this.image.width - this.canvas.width / this.currentZoom) / 2),
-        y: Math.max(0, (this.image.height - this.canvas.height / this.currentZoom) / 2),
+        // Preserve the empty margin from the whole-map view. Without this
+        // allowance, the boundary clamp overrides cursor-anchored zoom until
+        // the map grows wider/taller than the viewport.
+        x: Math.max(0, (this.image.width - viewportWidth) / 2) + fitGutterX,
+        y: Math.max(0, (this.image.height - viewportHeight) / 2) + fitGutterY,
       };
     },
 
