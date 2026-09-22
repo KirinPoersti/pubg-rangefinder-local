@@ -34,14 +34,19 @@ export default {
 .card{
   display: flex;
   flex-direction: column;
-  background-color: white;
+  overflow: hidden;
+  background-color: #151515;
+  color: #ffd24a;
+  border: 1px solid #2d2d2d;
   border-radius: 5px;
   cursor: pointer;
-  transition-duration: 250ms;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 45%);
+  transition: transform 250ms ease, border-color 250ms ease, box-shadow 250ms ease;
 }
 .card:hover{
-  background-color: rgb(144 231 48);
   transform: scale(1.1);
+  border-color: #ffd24a;
+  box-shadow: 0 0 14px rgb(255 210 74 / 35%);
 }
 .card__img{
   padding: 3px;
@@ -49,8 +54,13 @@ export default {
   height: 250px;
 }
 .text_wrapper{
-  margin-bottom: 5px;
+  padding: 10px 8px 12px;
   text-align: center;
   font-size: x-large;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.text_wrapper p {
+  margin: 0;
 }
 </style>
