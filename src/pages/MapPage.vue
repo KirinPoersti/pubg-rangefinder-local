@@ -28,7 +28,9 @@ export default {
 <style scoped>
 .page__wrapper {
   flex: 1 0 auto;
-  height: calc(100vh - 50px);
+  height: calc(100vh - var(--header-height));
+  height: calc(100dvh - var(--header-height));
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
