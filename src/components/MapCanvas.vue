@@ -39,7 +39,7 @@ declare interface BaseComponentData {
 
 const emptyCoords: ICoords = { x: 0, y: 0 };
 
-const [MAX_ZOOM, ZOOM_FACTOR] = [1.5, 1.25];
+const [MAX_ZOOM, ZOOM_FACTOR, WHEEL_ZOOM_SENSITIVITY] = [1.5, 1.25, 0.0015];
 
 export default {
   props: {
@@ -287,6 +287,8 @@ export default {
     },
 
     handleZoom(direction: 'inc' | 'dec') {
+      if (this.maploading || !this.canvas) return;
+
       const factor = direction === "inc" ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
       const nextZoom = Math.max(
         this.minZoom,
@@ -294,11 +296,11 @@ export default {
       );
       if (nextZoom === this.currentZoom) return;
 
-      this.currentZoom = +nextZoom.toFixed(4);
-      this.currentOffset = this.clampPanOffset(this.currentOffset);
-
-      this.setZoom();
-      this.draw();
+      const boundingRect = this.canvas!.getBoundingClientRect();
+      this.zoomAtPoint(nextZoom, {
+        x: boundingRect.x + boundingRect.width / 2,
+        y: boundingRect.y + boundingRect.height / 2
+      });
     },
 
     incZoom() {
@@ -342,9 +344,47 @@ export default {
 
 
     handleWheel(event: WheelEvent) {
-      if (this.dragging) return;
-      const { deltaY } = event;
-      (deltaY > 0) ? this.decZoom() : this.incZoom();
+      if (this.dragging || this.pinching || this.maploading || !this.canvas) return;
+
+      let normalizedDelta = event.deltaY;
+      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) normalizedDelta *= 16;
+      if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) normalizedDelta *= this.canvas.height;
+
+      const limitedDelta = Math.max(-240, Math.min(240, normalizedDelta));
+      const zoomFactor = Math.exp(-limitedDelta * WHEEL_ZOOM_SENSITIVITY);
+      const nextZoom = Math.max(
+        this.minZoom,
+        Math.min(MAX_ZOOM, this.currentZoom * zoomFactor)
+      );
+
+      this.zoomAtPoint(nextZoom, { x: event.clientX, y: event.clientY });
+    },
+
+    zoomAtPoint(nextZoom: number, clientPoint: ICoords, anchor?: ICoords) {
+      if (!this.canvas || !this.image) return;
+
+      const roundedZoom = +nextZoom.toFixed(6);
+      if (roundedZoom === this.currentZoom) return;
+
+      const mapAnchor = anchor ?? this.getClickCoordsOverCanvas(clientPoint);
+      const canvasRect = this.canvas.getBoundingClientRect();
+      const pointOnCanvas = {
+        x: clientPoint.x - canvasRect.x,
+        y: clientPoint.y - canvasRect.y
+      };
+
+      this.currentZoom = roundedZoom;
+      this.currentOffset = this.clampPanOffset({
+        x: mapAnchor.x
+          - this.image.width / 2
+          - (pointOnCanvas.x - this.canvas.width / 2) / this.currentZoom,
+        y: mapAnchor.y
+          - this.image.height / 2
+          - (pointOnCanvas.y - this.canvas.height / 2) / this.currentZoom
+      });
+
+      this.setZoom();
+      this.draw();
     },
 
     handleMouseDown(event: PointerEvent) {
@@ -519,25 +559,7 @@ export default {
         this.minZoom,
         Math.min(MAX_ZOOM, this.pinchStartZoom * zoomRatio)
       );
-      const midpoint = this.getPinchMidpoint(points);
-      const canvasRect = this.canvas.getBoundingClientRect();
-      const midpointOnCanvas = {
-        x: midpoint.x - canvasRect.x,
-        y: midpoint.y - canvasRect.y
-      };
-
-      this.currentZoom = +nextZoom.toFixed(3);
-      this.currentOffset = this.clampPanOffset({
-        x: this.pinchAnchor.x
-          - this.image.width / 2
-          - (midpointOnCanvas.x - this.canvas.width / 2) / this.currentZoom,
-        y: this.pinchAnchor.y
-          - this.image.height / 2
-          - (midpointOnCanvas.y - this.canvas.height / 2) / this.currentZoom
-      });
-
-      this.setZoom();
-      this.draw();
+      this.zoomAtPoint(nextZoom, this.getPinchMidpoint(points), this.pinchAnchor);
     },
 
     handleTouchTap(coords: ICoords) {
@@ -576,7 +598,7 @@ export default {
       <button @click="decZoom" class="map_bttn">-</button>
     </div>
     <div class="map_hint" aria-live="polite">
-      <span class="desktop_hint">Right-click to place markers · Drag to move</span>
+      <span class="desktop_hint">Scroll at cursor to zoom · Right-click markers · Drag to move</span>
       <span class="mobile_hint">Double-tap markers · Pinch to zoom · Drag to move</span>
     </div>
     <canvas 
