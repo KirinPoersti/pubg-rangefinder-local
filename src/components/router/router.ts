@@ -1,4 +1,4 @@
-import {createRouter, createWebHistory} from "vue-router";
+import {createRouter, createWebHashHistory} from "vue-router";
 import MainPage from "@/pages/MainPage.vue";
 import MapPage from "@/pages/MapPage.vue";
 import { mapList } from '@/libs/mapsParams';
@@ -21,7 +21,7 @@ const routes = [
 
 const router = createRouter({
     routes,
-    history: createWebHistory()
+    history: createWebHashHistory()
 })
 
 export default router;
