@@ -10,6 +10,7 @@ import PulseLoader from 'vue-spinner/src/PulseLoader.vue'
 declare interface BaseComponentData {
   currentMap: string;
   currentZoom: number;
+  minZoom: number;
   wrapper: HTMLDivElement | null;
   canvas: HTMLCanvasElement | null;
   context: CanvasRenderingContext2D | null;
@@ -38,7 +39,7 @@ declare interface BaseComponentData {
 
 const emptyCoords: ICoords = { x: 0, y: 0 };
 
-const [MIN_ZOOM, MAX_ZOOM, ZOOM_STEP] = [0.2, 1.5, 0.1];
+const [MAX_ZOOM, ZOOM_FACTOR] = [1.5, 1.25];
 
 export default {
   props: {
@@ -51,6 +52,7 @@ export default {
     return {
       currentMap: this.mapName,
       currentZoom: 0,
+      minZoom: 0,
       wrapper: null,
       canvas: null,
       context: null,
@@ -102,6 +104,8 @@ export default {
       if (this.image !== null) {
         this.canvas!.width = this.wrapper!.offsetWidth;
         this.canvas!.height = this.wrapper!.offsetHeight;
+        this.minZoom = this.getFitZoom();
+        this.currentZoom = this.minZoom;
 
         this.gridImage = new Image();
         this.gridImage.src = mapParams.grid;
@@ -187,9 +191,22 @@ export default {
 
       this.canvas.width = this.wrapper.offsetWidth;
       this.canvas.height = this.wrapper.offsetHeight;
+      this.minZoom = this.getFitZoom();
+      this.currentZoom = Math.max(this.currentZoom, this.minZoom);
       this.currentOffset = this.clampPanOffset(this.currentOffset);
       this.setZoom();
       this.draw();
+    },
+
+    getFitZoom(): number {
+      if (!this.canvas || !this.image || this.image.width <= 0 || this.image.height <= 0) {
+        return 0.05;
+      }
+
+      return Math.min(
+        this.canvas.width / this.image.width,
+        this.canvas.height / this.image.height
+      );
     },
 
     drawMarks() {
@@ -270,11 +287,14 @@ export default {
     },
 
     handleZoom(direction: 'inc' | 'dec') {
-      const limit = direction === "inc" ? MAX_ZOOM : MIN_ZOOM;
-      if (this.currentZoom === limit) return;
+      const factor = direction === "inc" ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+      const nextZoom = Math.max(
+        this.minZoom,
+        Math.min(MAX_ZOOM, this.currentZoom * factor)
+      );
+      if (nextZoom === this.currentZoom) return;
 
-      const delta = direction === "inc" ? ZOOM_STEP : -ZOOM_STEP;
-      this.currentZoom = +(this.currentZoom + delta).toFixed(2);
+      this.currentZoom = +nextZoom.toFixed(4);
       this.currentOffset = this.clampPanOffset(this.currentOffset);
 
       this.setZoom();
@@ -496,7 +516,7 @@ export default {
       const distance = this.getPinchDistance(points);
       const zoomRatio = distance / this.pinchStartDistance;
       const nextZoom = Math.max(
-        MIN_ZOOM,
+        this.minZoom,
         Math.min(MAX_ZOOM, this.pinchStartZoom * zoomRatio)
       );
       const midpoint = this.getPinchMidpoint(points);
