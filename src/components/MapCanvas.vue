@@ -20,6 +20,10 @@ declare interface BaseComponentData {
   dragging: boolean;
   movingMarker: number | null;
   touchStart: ICoords;
+  pointerDown: ICoords;
+  pointerMoved: boolean;
+  lastTapTime: number;
+  lastTapCoords: ICoords;
   currentOffset: ICoords;
   coordsStart: ICoords;
   dots: Array<ICoords>;
@@ -51,6 +55,10 @@ export default {
       dragging: false,
       movingMarker: null,
       touchStart: { ...emptyCoords },
+      pointerDown: { ...emptyCoords },
+      pointerMoved: false,
+      lastTapTime: 0,
+      lastTapCoords: { ...emptyCoords },
       currentOffset: { ...emptyCoords },
       coordsStart: { ...emptyCoords },
       dots: [],
@@ -312,6 +320,9 @@ export default {
 
         this.canvas?.setPointerCapture(event.pointerId);
 
+        this.pointerDown = { x: event.clientX, y: event.clientY };
+        this.pointerMoved = false;
+
         if (this.dots.length > 0) {
 
           const markerUnderCursor = this.getMarkerUnderCursor({ x: event.clientX, y: event.clientY });
@@ -341,6 +352,17 @@ export default {
     },
 
     handleMouseUp(event: PointerEvent) {
+      const wasMovingMarker = this.movingMarker !== null;
+
+      if (
+        event.type !== 'pointercancel'
+        && event.pointerType !== 'mouse'
+        && !this.pointerMoved
+        && !wasMovingMarker
+      ) {
+        this.handleTouchTap({ x: event.clientX, y: event.clientY });
+      }
+
       this.dragging = false;
       this.movingMarker = null;
 
@@ -356,6 +378,12 @@ export default {
     handleMouseMove(event: PointerEvent) {
       if (this.dragging) {
 
+        const movement = Math.hypot(
+          event.clientX - this.pointerDown.x,
+          event.clientY - this.pointerDown.y
+        );
+        if (movement > 8) this.pointerMoved = true;
+
         const currentOffset: ICoords = {
           x: this.currentOffset.x + (this.touchStart.x - event.clientX) / this.currentZoom,
           y: this.currentOffset.y + (this.touchStart.y - event.clientY) / this.currentZoom
@@ -370,6 +398,25 @@ export default {
         this.moveMarker(this.movingMarker, coordsUnderCursor);
       }
 
+    },
+
+    handleTouchTap(coords: ICoords) {
+      const now = Date.now();
+      const elapsed = now - this.lastTapTime;
+      const separation = Math.hypot(
+        coords.x - this.lastTapCoords.x,
+        coords.y - this.lastTapCoords.y
+      );
+
+      if (elapsed > 0 && elapsed <= 360 && separation <= 32) {
+        this.placeMarks(this.getClickCoordsOverCanvas(coords));
+        this.lastTapTime = 0;
+        this.lastTapCoords = { ...emptyCoords };
+        return;
+      }
+
+      this.lastTapTime = now;
+      this.lastTapCoords = { ...coords };
     },
   },
   components: {
@@ -387,6 +434,10 @@ export default {
     <div class="map_buttons" >
       <button @click="incZoom" class="map_bttn">+</button>
       <button @click="decZoom" class="map_bttn">-</button>
+    </div>
+    <div class="map_hint" aria-live="polite">
+      <span class="desktop_hint">Right-click to place markers · Drag to move</span>
+      <span class="mobile_hint">Double-tap to place markers · Drag to move</span>
     </div>
     <canvas 
       @contextmenu="disableContextMenu"
@@ -412,11 +463,15 @@ export default {
   position: absolute;
 }
 .map__canvas{
+  position: relative;
   height: 100%;
   width: 100%;
   flex: 1 0 auto;
 }
 .map__canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
   cursor: grab;
   touch-action: none;
 }
@@ -434,21 +489,66 @@ export default {
 }
 .map_buttons{
   position: absolute;
-  top: 60px;
-  right: 60px;
+  top: 18px;
+  right: 18px;
   z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 .map_bttn{
-  background-color: black;
-  color: white;
+  background-color: #151515;
+  color: #ffd24a;
   font-size: xx-large;
   cursor: pointer;
   height: 40px;
   width: 40px;
-  border: 1px solid white;
+  border: 1px solid #ffd24a;
+  border-radius: 4px;
+}
+.map_hint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 1;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border: 1px solid rgb(255 210 74 / 45%);
+  border-radius: 4px;
+  background: rgb(21 21 21 / 85%);
+  color: #ffd24a;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.mobile_hint {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .map_buttons {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    gap: 10px;
+  }
+  .map_bttn {
+    width: 48px;
+    height: 48px;
+    font-size: 2rem;
+  }
+  .map_hint {
+    bottom: max(10px, env(safe-area-inset-bottom));
+    max-width: calc(100% - 20px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.72rem;
+  }
+  .desktop_hint {
+    display: none;
+  }
+  .mobile_hint {
+    display: inline;
+  }
 }
 
 </style>
