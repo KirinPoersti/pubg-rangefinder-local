@@ -33,7 +33,9 @@ declare interface BaseComponentData {
   pinchAnchor: ICoords;
   focusPoint: ICoords | null;
   focusPointVisible: boolean;
+  focusPointOpacity: number;
   focusPointTimer: number | null;
+  focusPointFadeFrame: number | null;
   currentOffset: ICoords;
   coordsStart: ICoords;
   dots: Array<ICoords>;
@@ -47,7 +49,7 @@ const [MAX_ZOOM, ZOOM_FACTOR, WHEEL_ZOOM_SENSITIVITY] = [
   1.25,
   0.0015
 ];
-const FOCUS_POINT_DURATION = 3200;
+const [FOCUS_POINT_HOLD_DURATION, FOCUS_POINT_FADE_DURATION] = [700, 300];
 
 export default {
   props: {
@@ -83,7 +85,9 @@ export default {
       pinchAnchor: { ...emptyCoords },
       focusPoint: null,
       focusPointVisible: false,
+      focusPointOpacity: 0,
       focusPointTimer: null,
+      focusPointFadeFrame: null,
       currentOffset: { ...emptyCoords },
       coordsStart: { ...emptyCoords },
       dots: [],
@@ -133,6 +137,7 @@ export default {
   beforeUnmount() {
     window.removeEventListener('resize', this.handleResize);
     if (this.focusPointTimer !== null) window.clearTimeout(this.focusPointTimer);
+    if (this.focusPointFadeFrame !== null) window.cancelAnimationFrame(this.focusPointFadeFrame);
   },
   methods: {
     drawBackground() {
@@ -266,6 +271,7 @@ export default {
       gradient.addColorStop(1, 'rgba(159, 178, 190, 0.08)');
 
       this.context.save();
+      this.context.globalAlpha = this.focusPointOpacity;
       this.context.beginPath();
       this.context.arc(center.x, center.y, outerRadius, 0, Math.PI * 2);
       this.context.fillStyle = gradient;
@@ -286,13 +292,31 @@ export default {
 
     revealFocusPoint() {
       this.focusPointVisible = true;
+      this.focusPointOpacity = 1;
       if (this.focusPointTimer !== null) window.clearTimeout(this.focusPointTimer);
+      if (this.focusPointFadeFrame !== null) window.cancelAnimationFrame(this.focusPointFadeFrame);
 
       this.focusPointTimer = window.setTimeout(() => {
-        this.focusPointVisible = false;
         this.focusPointTimer = null;
-        this.draw();
-      }, FOCUS_POINT_DURATION);
+        const fadeStartedAt = performance.now();
+
+        const fade = (now: number) => {
+          const progress = Math.min(1, (now - fadeStartedAt) / FOCUS_POINT_FADE_DURATION);
+          this.focusPointOpacity = 1 - progress;
+
+          if (progress < 1) {
+            this.draw();
+            this.focusPointFadeFrame = window.requestAnimationFrame(fade);
+            return;
+          }
+
+          this.focusPointVisible = false;
+          this.focusPointFadeFrame = null;
+          this.draw();
+        };
+
+        this.focusPointFadeFrame = window.requestAnimationFrame(fade);
+      }, FOCUS_POINT_HOLD_DURATION);
     },
 
     selectFocusPoint(clientPoint: ICoords) {
@@ -545,6 +569,7 @@ export default {
       if (
         event.type !== 'pointercancel'
         && event.pointerType === 'mouse'
+        && event.button === 0
         && !this.pointerMoved
         && !wasMovingMarker
       ) {
